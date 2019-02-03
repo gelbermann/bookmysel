@@ -24,14 +24,27 @@ def parse_arguments():
     return args
 
 
+def wait_for_element_by_xpath(xpath, timeout, reason):
+    try:
+        element = wait(driver, timeout).until(EC.presence_of_element_located((By.XPATH, xpath)))
+    except TimeoutException as e:
+        report_failure(reason, args.loginemail[0])
+    else:
+        return element
+
+
 def login(username, password):
-    def fill_element(name, value): 
-        elem = driver.find_element_by_name(name)
+    def fill_element(xpath, reason, value):  # TODO extract and change to using xpath
+        # elem = driver.find_element_by_name(name)
+        elem = wait_for_element_by_xpath(xpath, 10, reason)
         elem.clear()
         elem.send_keys(value, Keys.RETURN)
 
-    fill_element("loginfmt", username) 
-    fill_element("passwd", password) 
+    reason = "Login Failure"
+    # fill_element("loginfmt", username) 
+    # fill_element("passwd", password) 
+    fill_element("//input[@name='loginfmt']", reason, username)
+    fill_element("//input[@name='passwd']", reason, password)
     try:
         login_btn = wait(driver, 10) \
                     .until(EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
@@ -39,7 +52,12 @@ def login(username, password):
         report_failure("Login Failure", args.loginemail[0], error=e)
     else:
         login_btn.send_keys(Keys.ENTER)
-    driver.find_element_by_class_name("btn-primary").click() # "yes" button on login check
+    # driver.find_element_by_class_name("btn-primary").click() # "yes" button on login check
+    # try:
+        # driver.find_element_by_xpath("//input[@type='submit']").click() # "yes" button on login check 
+    # except TimeoutException as e:
+        # report_failure("Login Failure", args.loginemail[0]) # TODO Add dates (not just here)
+    wait_for_element_by_xpath("//input[@type='submit']", 20, reason)
 
 
 def search_date(date, length):
@@ -84,7 +102,7 @@ def report_failure(reason, target, date="--/--/----", hour="--:--", error=None):
         server.ehlo()
         server.starttls()
         server.ehlo()
-        server.login(fromaddr.split('@')[0], "seleniumrocks") # TODO change to args
+        server.login(fromaddr.split('@')[0], "seleniumrocks")
 
     msg = MIMEMultipart()
     msg['From'] = fromaddr
@@ -102,17 +120,18 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     if osname == 'posix':
-        driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver')
+        options = webdriver.ChromeOptions() 
+        options.add_argument('headless')
+        driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=options)
     elif osname == 'nt':
         driver = webdriver.Chrome()
     else:
         report_failure("OS Mismatch", args.loginmail[0])
+    driver.implicitly_wait(20)
     driver.get("https://bookme.technion.ac.il/booked/Web/search-availability.php")
     if not "BookMe" in driver.title: 
-        # login("gelbermann@campus.technion.ac.il", "Fk1jhhk1") # TODO change to args
         login(args.loginemail[0], args.loginpass[0])
 
-    # hour = '13:00' # TODO change to arg
     now = datetime.datetime.now()
     delta = datetime.timedelta(weeks=2)
     date = now + delta
@@ -125,13 +144,11 @@ if __name__ == "__main__":
             '11': 'Claude Shannon',
              '8': 'Alan Turing'}
     for room_id in rooms.keys():
-        # search_date("17/02/2019", "180") # TODO change to args
         search_date(date, length)
         try:
             opening = wait(driver, 20).until(EC.presence_of_element_located((By.XPATH, \
                 f"//div[@class='opening' and @data-resourceid='{room_id}' and contains(@data-startdate, '{hour}')]")))
         except TimeoutException as e:
-            # print("!!!!!!!! error waiting for opening !!!!!!!!")
             driver.refresh()
         else:
             opening.click()
@@ -144,8 +161,4 @@ if __name__ == "__main__":
             else:
                 driver.back()
 
-    # report_creds = args.reportemail[0] and args.reportpass[0]
-    # report_failure("No Successful Reservation", \
-    #         fromaddr=(args.reportemail[0] if report_creds else args.loginemail[0]), \
-    #         fromaddr_pass=(args.reportpass[0] if report_creds else args.loginpass[0]), target=args.loginemail[0])
     report_failure("No Reservation was Successful", args.loginemail[0])
