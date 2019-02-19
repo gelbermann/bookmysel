@@ -24,40 +24,45 @@ def parse_arguments():
     return args
 
 
-def wait_for_element_by_xpath(xpath, timeout, reason):
-    try:
-        element = wait(driver, timeout).until(EC.presence_of_element_located((By.XPATH, xpath)))
-    except TimeoutException as e:
-        report_failure(reason, args.loginemail[0])
-    else:
-        return element
+def wait_for_element_by_xpath(xpath, timeout, reason, ec=None): 
+        try:
+            if ec is None:
+                ec = EC.presence_of_element_located((By.XPATH, xpath))
+            element = wait(driver, timeout).until(ec)
+        except TimeoutException as e:
+            report_failure(reason, args.loginemail[0], date=date, hour=hour) # TODO Add dates (everywhere)
+        else:
+            return element
 
 
 def login(username, password):
-    def fill_element(xpath, reason, value):  # TODO extract and change to using xpath
-        # elem = driver.find_element_by_name(name)
+    def fill_element(xpath, reason, value):
         elem = wait_for_element_by_xpath(xpath, 10, reason)
         elem.clear()
         elem.send_keys(value, Keys.RETURN)
 
     reason = "Login Failure"
-    # fill_element("loginfmt", username) 
-    # fill_element("passwd", password) 
     fill_element("//input[@name='loginfmt']", reason, username)
+    print("filled username")
     fill_element("//input[@name='passwd']", reason, password)
-    try:
-        login_btn = wait(driver, 10) \
-                    .until(EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
-    except TimeoutException as e:
-        report_failure("Login Failure", args.loginemail[0], error=e)
-    else:
-        login_btn.send_keys(Keys.ENTER)
-    # driver.find_element_by_class_name("btn-primary").click() # "yes" button on login check
+    print("filled password")
     # try:
-        # driver.find_element_by_xpath("//input[@type='submit']").click() # "yes" button on login check 
+    #     login_btn = wait(driver, 10) \
+    #                 .until(EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
     # except TimeoutException as e:
-        # report_failure("Login Failure", args.loginemail[0]) # TODO Add dates (not just here)
-    wait_for_element_by_xpath("//input[@type='submit']", 20, reason)
+    #     report_failure("Login Failure", args.loginemail[0], error=e)
+    # else:
+    #     login_btn.send_keys(Keys.ENTER)
+    login_btn = wait_for_element_by_xpath("", 10, reason, \
+                 ec=EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
+    print("found login btn")
+    login_btn.send_keys(Keys.ENTER)
+    print("clicked login btn")
+
+    if osname == 'nt':
+        confirm_btn = wait_for_element_by_xpath("//input[@type='submit']", 10, reason) # "yes" button on login check
+        confirm_btn.send_keys(Keys.ENTER)
+        print("clicked yes")
 
 
 def search_date(date, length):
@@ -118,6 +123,12 @@ def report_failure(reason, target, date="--/--/----", hour="--:--", error=None):
 
 if __name__ == "__main__":
     args = parse_arguments()
+    now = datetime.datetime.now()
+    delta = datetime.timedelta(weeks=2)
+    date = now + delta
+    hour = args.hour[0] if args.hour else date.strftime("%H:00") # default hour is current hour
+    date = args.date[0] if args.date else date.strftime("%d/%m/%Y") # default time is 2 weeks from now
+    length = args.minutes[0] if args.minutes else "180" # default length 3 hours
 
     if osname == 'posix':
         options = webdriver.ChromeOptions() 
@@ -127,17 +138,10 @@ if __name__ == "__main__":
         driver = webdriver.Chrome()
     else:
         report_failure("OS Mismatch", args.loginmail[0])
-    driver.implicitly_wait(20)
+    # driver.implicitly_wait(20)
     driver.get("https://bookme.technion.ac.il/booked/Web/search-availability.php")
     if not "BookMe" in driver.title: 
         login(args.loginemail[0], args.loginpass[0])
-
-    now = datetime.datetime.now()
-    delta = datetime.timedelta(weeks=2)
-    date = now + delta
-    hour = args.hour[0] if args.hour else date.strftime("%H:00") # default hour is current hour
-    date = args.date[0] if args.date else date.strftime("%d/%m/%Y") # default time is 2 weeks from now
-    length = args.minutes[0] if args.minutes else "180" # default length 3 hours
 
     rooms = {'9': 'Ada Lovelace',
             '10': 'John Von Neumann',
