@@ -17,20 +17,21 @@ def parse_arguments():
     parser.add_argument("-p", "--loginpass", nargs="+",  required=True)
     parser.add_argument("-d", "--date", nargs="+")
     parser.add_argument("-H", "--hour", nargs="+")
-    parser.add_argument("-m", "--minutes", nargs="+")
+    parser.add_argument("-l", "--length", nargs="+")
     # parser.add_argument("--reportemail", nargs="+")
     # parser.add_argument("--reportpass", nargs="+")
     args = parser.parse_args()
     return args
 
 
-def wait_for_element_by_xpath(xpath, timeout, reason, ec=None): 
+def wait_for_element_by_xpath(xpath, timeout, reason, multiple=False, ec=None): 
         try:
             if ec is None:
-                ec = EC.presence_of_element_located((By.XPATH, xpath))
+                ec = EC.presence_of_element_located((By.XPATH, xpath)) if not multiple\
+                     else EC.presence_of_all_elements_located((By.XPATH, xpath))
             element = wait(driver, timeout).until(ec)
         except TimeoutException as e:
-            report_failure(reason, args.loginemail[0], date=date, hour=hour) # TODO Add dates (everywhere)
+            report_failure(reason, args.loginemail[0], date=date, hour=hour) 
         else:
             return element
 
@@ -43,30 +44,20 @@ def login(username, password):
 
     reason = "Login Failure"
     fill_element("//input[@name='loginfmt']", reason, username)
-    print("filled username")
     fill_element("//input[@name='passwd']", reason, password)
-    print("filled password")
-    # try:
-    #     login_btn = wait(driver, 10) \
-    #                 .until(EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
-    # except TimeoutException as e:
-    #     report_failure("Login Failure", args.loginemail[0], error=e)
-    # else:
-    #     login_btn.send_keys(Keys.ENTER)
     login_btn = wait_for_element_by_xpath("", 10, reason, \
                  ec=EC.element_to_be_clickable((By.XPATH, "//input[@id='idSIButton9']")))
-    print("found login btn")
     login_btn.send_keys(Keys.ENTER)
-    print("clicked login btn")
 
     if osname == 'nt':
         confirm_btn = wait_for_element_by_xpath("//input[@type='submit']", 10, reason) # "yes" button on login check
         confirm_btn.send_keys(Keys.ENTER)
-        print("clicked yes")
+    print("Logged in")
 
 
-def search_date(date, length):
-    time_btns = driver.find_elements_by_xpath("//label[@class='btn btn-default']")
+def search_date(date, length, room):
+    # time_btns = driver.find_elements_by_xpath("//label[@class='btn btn-default']")
+    time_btns = wait_for_element_by_xpath("//label[@class='btn btn-default']", 10, "Site Loading Issues", multiple=True)
     time_btns[2].click() # select "date range" button
 
     begin_date = driver.find_element_by_xpath("//input[@type='text' and @id='beginDate']")
@@ -81,9 +72,10 @@ def search_date(date, length):
 
     input_min = driver.find_element_by_xpath("//input[@class='form-control hours-minutes' and @id='minutes']")
     input_min.clear()
-    input_min.send_keys(length) # TODO change to arg
+    input_min.send_keys(length)
     submit_btn = driver.find_element_by_name("SUBMIT")
     submit_btn.send_keys(Keys.ENTER)
+    print(f"Searching date {date} for room {room}")
 
 
 def verify_success():
@@ -97,7 +89,7 @@ def verify_success():
 
 def report_failure(reason, target, date="--/--/----", hour="--:--", error=None):
     fromaddr = "bookmysel@gmail.com"
-    body = f"Uh oh!\n\nScheduling a reservation for {date} at {hour} failed because of {reason}.\n\n" 
+    body = f"\nUh oh!\nScheduling a reservation for {date} at {hour} failed because of {reason}.\n" 
     if error is not None:
         body = body + f"Further details:\n{str(error)}"
     body = str(body)
@@ -123,12 +115,10 @@ def report_failure(reason, target, date="--/--/----", hour="--:--", error=None):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    now = datetime.datetime.now()
-    delta = datetime.timedelta(weeks=2)
-    date = now + delta
+    date = datetime.datetime.now() + datetime.timedelta(weeks=2)
     hour = args.hour[0] if args.hour else date.strftime("%H:00") # default hour is current hour
     date = args.date[0] if args.date else date.strftime("%d/%m/%Y") # default time is 2 weeks from now
-    length = args.minutes[0] if args.minutes else "180" # default length 3 hours
+    length = args.length[0] if args.length else "180" # default length 3 hours
 
     if osname == 'posix':
         options = webdriver.ChromeOptions() 
@@ -137,8 +127,7 @@ if __name__ == "__main__":
     elif osname == 'nt':
         driver = webdriver.Chrome()
     else:
-        report_failure("OS Mismatch", args.loginmail[0])
-    # driver.implicitly_wait(20)
+        report_failure("OS Mismatch", args.loginmail[0], date, hour)
     driver.get("https://bookme.technion.ac.il/booked/Web/search-availability.php")
     if not "BookMe" in driver.title: 
         login(args.loginemail[0], args.loginpass[0])
@@ -148,9 +137,9 @@ if __name__ == "__main__":
             '11': 'Claude Shannon',
              '8': 'Alan Turing'}
     for room_id in rooms.keys():
-        search_date(date, length)
+        search_date(date, length, rooms[room_id])
         try:
-            opening = wait(driver, 20).until(EC.presence_of_element_located((By.XPATH, \
+            opening = wait(driver, 60).until(EC.presence_of_element_located((By.XPATH, \
                 f"//div[@class='opening' and @data-resourceid='{room_id}' and contains(@data-startdate, '{hour}')]")))
         except TimeoutException as e:
             driver.refresh()
@@ -165,4 +154,4 @@ if __name__ == "__main__":
             else:
                 driver.back()
 
-    report_failure("No Reservation was Successful", args.loginemail[0])
+    report_failure("No Reservation was Successful", args.loginemail[0], date, hour)
