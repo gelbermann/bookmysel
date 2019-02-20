@@ -3,7 +3,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait as wait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException 
 from sys import argv
 import smtplib, argparse, datetime
 from email.mime.multipart import MIMEMultipart
@@ -30,7 +30,7 @@ def wait_for_element_by_xpath(xpath, timeout, reason, multiple=False, ec=None):
                 ec = EC.presence_of_element_located((By.XPATH, xpath)) if not multiple\
                      else EC.presence_of_all_elements_located((By.XPATH, xpath))
             element = wait(driver, timeout).until(ec)
-        except TimeoutException as e:
+        except TimeoutException:
             report_failure(reason, args.loginemail[0], date=date, hour=hour) 
         else:
             return element
@@ -43,6 +43,7 @@ def login(username, password):
         elem.send_keys(value, Keys.RETURN)
 
     reason = "Login Failure"
+    # TODO Fix StaleReference exception on RPi - wait for username/password elements
     fill_element("//input[@name='loginfmt']", reason, username)
     fill_element("//input[@name='passwd']", reason, password)
     login_btn = wait_for_element_by_xpath("", 10, reason, \
@@ -81,7 +82,7 @@ def search_date(date, length, room):
 def verify_success():
     try:
         wait(driver, 5).until(EC.presence_of_element_located((By.XPATH, "//input[@id='btnSaveSuccessful']")))
-    except TimeoutException as e:
+    except TimeoutException:
         return False    
     else:
         return True
@@ -113,21 +114,7 @@ def report_failure(reason, target, date="--/--/----", hour="--:--", error=None):
     exit()
 
 
-if __name__ == "__main__":
-    args = parse_arguments()
-    date = datetime.datetime.now() + datetime.timedelta(weeks=2)
-    hour = args.hour[0] if args.hour else date.strftime("%H:00") # default hour is current hour
-    date = args.date[0] if args.date else date.strftime("%d/%m/%Y") # default time is 2 weeks from now
-    length = args.length[0] if args.length else "180" # default length 3 hours
-
-    if osname == 'posix':
-        options = webdriver.ChromeOptions() 
-        options.add_argument('headless')
-        driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=options)
-    elif osname == 'nt':
-        driver = webdriver.Chrome()
-    else:
-        report_failure("OS Mismatch", args.loginmail[0], date, hour)
+def main():
     driver.get("https://bookme.technion.ac.il/booked/Web/search-availability.php")
     if not "BookMe" in driver.title: 
         login(args.loginemail[0], args.loginpass[0])
@@ -139,11 +126,14 @@ if __name__ == "__main__":
     for room_id in rooms.keys():
         search_date(date, length, rooms[room_id])
         try:
-            opening = wait(driver, 60).until(EC.presence_of_element_located((By.XPATH, \
+            print("waiting for" + f"//div[@class='opening' and @data-resourceid='{room_id}' and contains(@data-startdate, '{hour}')]")
+            opening = wait(driver, 20).until(EC.presence_of_element_located((By.XPATH, \
                 f"//div[@class='opening' and @data-resourceid='{room_id}' and contains(@data-startdate, '{hour}')]")))
-        except TimeoutException as e:
+        except TimeoutException:
+            print("not found")
             driver.refresh()
         else:
+            print("found")
             opening.click()
             driver.find_element_by_xpath("//label[@for='startReminderEnabled']").click() 
             driver.find_elements_by_xpath("//button[contains(@class, 'save')]")[1].click() 
@@ -155,3 +145,31 @@ if __name__ == "__main__":
                 driver.back()
 
     report_failure("No Reservation was Successful", args.loginemail[0], date, hour)
+
+
+if __name__ == "__main__":
+    args = parse_arguments()    
+    date = datetime.datetime.now() + datetime.timedelta(weeks=2)
+    hour = args.hour[0] if args.hour else date.strftime("%H:00") # default hour is current hour
+    date = args.date[0] if args.date else date.strftime("%d/%m/%Y") # default date is 2 weeks from today
+    length = args.length[0] if args.length else "180" # default length 3 hours
+
+    if osname == 'posix':
+        options = webdriver.ChromeOptions() 
+        options.add_argument('headless')
+        driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=options)
+    elif osname == 'nt':
+        driver = webdriver.Chrome()
+    else:
+        report_failure("OS Mismatch", args.loginmail[0], date, hour)
+
+    while True:
+        try:
+            main()
+        except StaleElementReferenceException:
+            continue
+        except Exception as e:
+            report_failure("Unknown Exception", args.loginemail[0], error=e)
+            break
+        else:
+            break
